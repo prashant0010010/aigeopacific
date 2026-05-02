@@ -13,7 +13,6 @@ mechanism with [data-theme] as fallback.
 """
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 
 _CSS_BASE = """
@@ -669,7 +668,6 @@ def inject_theme_attribute(theme: str = "dark") -> None:
     rm_cls     = "theme-dark" if safe_theme == "light" else "theme-light"
 
     js = f"""
-    <script>
     (function applyTheme() {{
         var p = window.parent;
         if (!p || !p.document) {{ setTimeout(applyTheme, 200); return; }}
@@ -689,7 +687,9 @@ def inject_theme_attribute(theme: str = "dark") -> None:
         var sb = doc.querySelector('[data-testid="stSidebar"]');
         if (sb) sb.setAttribute('data-theme', '{safe_theme}');
     }})();
-    </script>
     """
-    # height=0 so it takes no visual space
-    components.html(js, height=0, scrolling=False)
+
+    # Wrap JS in a minimal HTML document for st.iframe's srcdoc parameter.
+    # height=0 so it takes no visual space.
+    html_doc = f"<html><body><script>{js}</script></body></html>"
+    st.iframe(srcdoc=html_doc, height=0, scrolling=False)

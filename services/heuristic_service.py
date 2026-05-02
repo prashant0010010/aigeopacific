@@ -20,7 +20,7 @@ import random
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
-from core.models import EnrichmentResult, MetricScore
+from core.models import AuditResult, EnrichmentResult, MetricScore
 
 # ---------------------------------------------------------------------------
 # Score band thresholds
@@ -505,3 +505,34 @@ def generate_enrichment(audit_data: dict) -> EnrichmentResult:
         llm_key_signals=llm_key_signals,
         suggested_search_prompts=suggested_search_prompts,
     )
+
+# ===========================================================================
+# Public enrich() API — mirrors gemini_service.enrich(result: AuditResult)
+# ===========================================================================
+
+
+def enrich(result: AuditResult) -> EnrichmentResult:
+    """
+    Public entry point called by audit_runner._get_enrichment().
+
+    Converts an AuditResult into the dict format expected by
+    generate_enrichment() and delegates to it.
+
+    Parameters
+    ----------
+    result : AuditResult
+        The fully-scored AuditResult from the audit pipeline.
+
+    Returns
+    -------
+    EnrichmentResult
+        Fully populated EnrichmentResult — never raises, never returns None.
+    """
+    audit_data = {
+        "url": result.url,
+        "cqs": result.cqs,
+        # Pass MetricScore objects directly — generate_enrichment handles both
+        "metric_scores": result.metrics,
+        "competitor_comparison": result.competitor_comparison,
+    }
+    return generate_enrichment(audit_data)

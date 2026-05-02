@@ -85,22 +85,18 @@ def _extract_metric_scores(result: AuditResult) -> dict[str, float]:
     """
     Extract a flat dict of metric_name -> score from an AuditResult.
 
-    Handles None metric_scores gracefully by returning an empty dict.
+    Handles an empty or missing metrics list gracefully by returning {}.
 
     Args:
-        result: AuditResult object with populated metric_scores.
+        result: AuditResult object with populated metrics list.
 
     Returns:
         Dict mapping metric name to numeric score (0–100).
     """
-    if not result.metric_scores:
+    if not result.metrics:
         return {}
 
-    scores: dict[str, float] = {}
-    for metric in result.metric_scores:
-        # MetricScore objects have .name and .score attributes per models.py
-        scores[metric.name] = float(metric.score)
-    return scores
+    return {m.name: float(m.score) for m in result.metrics}
 
 
 # ------------------------------------------------------------------

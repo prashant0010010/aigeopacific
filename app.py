@@ -193,7 +193,7 @@ with st.sidebar:
         )
         accent_color_input = st.color_picker(
             "Accent colour",
-            value="#f5b800",
+            value="#c49b00",
         )
         logo_file = st.file_uploader(
             "Logo (PNG/JPG, max 2 MB)",
@@ -383,7 +383,7 @@ elif st.session_state.audit_status == "running":
 
         branding = BrandingConfig(
             firm_name=firm_name_input.strip() if firm_name_input.strip() else "AiGeoPacific",
-            primary_color=accent_color_input or "#f5b800",
+            primary_color=accent_color_input or "#c49b00",
             logo_path=logo_path,
             footer_text=f"Confidential — {firm_name_input.strip() or 'AiGeoPacific'}",
         )

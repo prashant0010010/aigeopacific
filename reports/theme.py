@@ -32,23 +32,37 @@ from reportlab.pdfbase.ttfonts import TTFont
 # Color Tokens
 # ===========================================================================
 
-# Core palette
+# Core palette (dark — kept for legacy compat, not used in PDF)
 BG_DARK   = colors.HexColor("#0a0c10")
-GOLD      = colors.HexColor("#f5b800")
-CARD_BG   = colors.HexColor("#141720")
-BORDER    = colors.HexColor("#374151")
-TEXT_MAIN = colors.HexColor("#FFFFFF")
-TEXT_DIM  = colors.HexColor("#9CA3AF")
+GOLD      = colors.HexColor("#c49b00")   # darker gold — legible on white
+CARD_BG   = colors.HexColor("#f8f9fa")   # light card bg for PDF
+BORDER    = colors.HexColor("#e5e7eb")   # light border for PDF
+TEXT_MAIN = colors.HexColor("#111827")   # dark text on white PDF
+TEXT_DIM  = colors.HexColor("#6b7280")   # muted dark text
 
-# Status palette
-SUCCESS = colors.HexColor("#166534")
-WARNING = colors.HexColor("#92400e")
-ERROR   = colors.HexColor("#991b1b")
+# Status palette — PDF light mode uses readable colors on white
+SUCCESS = colors.HexColor("#dcfce7")    # light green bg
+WARNING = colors.HexColor("#fef3c7")    # light amber bg
+ERROR   = colors.HexColor("#fee2e2")    # light red bg
 
 # Status text palette (foreground on status backgrounds)
-SUCCESS_TEXT = colors.HexColor("#dcfce7")
-WARNING_TEXT = colors.HexColor("#fef3c7")
-ERROR_TEXT   = colors.HexColor("#fee2e2")
+SUCCESS_TEXT = colors.HexColor("#166534")
+WARNING_TEXT = colors.HexColor("#92400e")
+ERROR_TEXT   = colors.HexColor("#991b1b")
+
+# PDF-specific light-mode palette (always used in reports)
+PDF_BG        = colors.HexColor("#ffffff")   # white page background
+PDF_ACCENT    = colors.HexColor("#c49b00")   # gold — readable on white
+PDF_CARD_BG   = colors.HexColor("#f8f9fa")   # off-white card
+PDF_BORDER    = colors.HexColor("#e5e7eb")   # light border
+PDF_TEXT      = colors.HexColor("#111827")   # near-black body text
+PDF_TEXT_DIM  = colors.HexColor("#6b7280")   # muted secondary text
+PDF_SUCCESS_BG   = colors.HexColor("#dcfce7")
+PDF_SUCCESS_TEXT = colors.HexColor("#166534")
+PDF_WARNING_BG   = colors.HexColor("#fef3c7")
+PDF_WARNING_TEXT = colors.HexColor("#92400e")
+PDF_ERROR_BG     = colors.HexColor("#fee2e2")
+PDF_ERROR_TEXT   = colors.HexColor("#991b1b")
 
 # Convenience aliases
 WHITE = colors.HexColor("#FFFFFF")

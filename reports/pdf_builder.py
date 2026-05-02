@@ -54,6 +54,20 @@ from reports.theme import (
     _FONT_KEY_BODY,
     _FONT_KEY_HEADING,
     _FONT_KEY_MONO,
+    # PDF-specific light-mode colors (Phase 2 fix: PDF always renders light)
+    PDF_BG,
+    PDF_ACCENT,
+    PDF_CARD_BG,
+    PDF_BORDER,
+    PDF_TEXT,
+    PDF_TEXT_DIM,
+    PDF_SUCCESS_BG,
+    PDF_SUCCESS_TEXT,
+    PDF_WARNING_BG,
+    PDF_WARNING_TEXT,
+    PDF_ERROR_BG,
+    PDF_ERROR_TEXT,
+    WHITE,
 )
 
 # ---------------------------------------------------------------------------
@@ -93,7 +107,7 @@ class BrandingConfig:
         Name shown in the header wordmark and footer. Default: "AiGeoPacific"
     primary_color : str
         Hex accent colour replacing GOLD in headers and chips.
-        Default: "#f5b800"
+        Default: "#c49b00" (dark gold, readable on white PDF)
     logo_path : Optional[str]
         Absolute path to a PNG or JPG logo (max 200x60px display).
         If None or file missing, no logo is drawn.
@@ -105,7 +119,7 @@ class BrandingConfig:
     def __init__(
         self,
         firm_name: str = "AiGeoPacific",
-        primary_color: str = "#f5b800",
+        primary_color: str = "#c49b00",
         logo_path: Optional[str] = None,
         footer_text: str = "Confidential — AiGeoPacific",
     ) -> None:
@@ -246,6 +260,7 @@ class PDFBuilder:
         self.canvas.showPage()
         self.page_num += 1
         self.current_y = CONTENT_TOP
+        self._fill_page_background()  # ensure white bg on every page
         self._draw_page_chrome()
 
     def _draw_page_chrome(self) -> None:
@@ -330,12 +345,16 @@ class PDFBuilder:
         self.canvas.line(MARGIN_L, self.current_y, MARGIN_L + CONTENT_WIDTH, self.current_y)
         self.canvas.restoreState()
 
-    def _fill_dark_background(self) -> None:
-        from reports.theme import BG_DARK
+    def _fill_page_background(self) -> None:
+        """Fill page with PDF light background (white). PDF always renders light."""
         self.canvas.saveState()
-        self.canvas.setFillColor(BG_DARK)
+        self.canvas.setFillColor(PDF_BG)
         self.canvas.rect(0, 0, PAGE_WIDTH, PAGE_HEIGHT, fill=1, stroke=0)
         self.canvas.restoreState()
+
+    def _fill_dark_background(self) -> None:
+        """Alias kept for backward compat — now calls light background."""
+        self._fill_page_background()
 
     # -----------------------------------------------------------------------
     # Logo helper (Phase 2)
@@ -392,7 +411,7 @@ class PDFBuilder:
         c.setFillColor(self._accent)
         c.drawString(MARGIN_L, cy, self.branding.firm_name)
         c.setFont(FONT_MAP[_FONT_KEY_BODY], 11)
-        c.setFillColor(TEXT_DIM)
+        c.setFillColor(PDF_TEXT_DIM)
         c.drawString(MARGIN_L + len(self.branding.firm_name) * 6.5 + 8, cy, "AI Citation Analyzer")
         c.restoreState()
 
@@ -416,7 +435,7 @@ class PDFBuilder:
         cy -= 60
         c.saveState()
         c.setFont(FONT_MAP[_FONT_KEY_HEADING], 26)
-        c.setFillColor(TEXT_MAIN)
+        c.setFillColor(PDF_TEXT)
         c.drawString(MARGIN_L, cy, "AI Citation")
         cy -= 34
         c.setFillColor(self._accent)
@@ -427,11 +446,11 @@ class PDFBuilder:
         cy -= 28
         c.saveState()
         c.setFont(FONT_MAP[_FONT_KEY_MONO], 8)
-        c.setFillColor(TEXT_DIM)
+        c.setFillColor(PDF_TEXT_DIM)
         c.drawString(MARGIN_L, cy, "ANALYZED URL")
         cy -= 14
         c.setFont(FONT_MAP[_FONT_KEY_BODY], 9)
-        c.setFillColor(TEXT_MAIN)
+        c.setFillColor(PDF_TEXT)
         display_url = self.url[:80] + ("..." if len(self.url) > 80 else "")
         c.drawString(MARGIN_L, cy, display_url)
         c.restoreState()
@@ -445,22 +464,22 @@ class PDFBuilder:
         interp_y = badge_y - 100
         c.saveState()
         c.setFont(FONT_MAP[_FONT_KEY_BODY], 9)
-        c.setFillColor(TEXT_DIM)
+        c.setFillColor(PDF_TEXT_DIM)
         c.drawCentredString(badge_cx, interp_y, f"This page is a {band} AI citation candidate")
         c.restoreState()
 
         # Confidence chip
         if self.confidence:
             conf_level = getattr(self.confidence, "level", "Low")
-            chip_colors = {"High": self._accent, "Medium": TEXT_DIM, "Low": BORDER}
-            chip_color = chip_colors.get(conf_level, BORDER)
+            chip_colors = {"High": self._accent, "Medium": PDF_TEXT_DIM, "Low": PDF_BORDER}
+            chip_color = chip_colors.get(conf_level, PDF_BORDER)
             chip_x = badge_cx - 45
             chip_y = interp_y - 24
             c.saveState()
             c.setFillColor(chip_color)
             c.roundRect(chip_x, chip_y, 90, 16, 4, fill=1, stroke=0)
             c.setFont(FONT_MAP[_FONT_KEY_MONO], 8)
-            c.setFillColor(TEXT_MAIN)
+            c.setFillColor(PDF_TEXT)
             c.drawCentredString(badge_cx, chip_y + 4, f"Confidence: {conf_level}")
             c.restoreState()
 
@@ -468,7 +487,7 @@ class PDFBuilder:
         date_str = datetime.now().strftime("%B %d, %Y")
         c.saveState()
         c.setFont(FONT_MAP[_FONT_KEY_MONO], 7)
-        c.setFillColor(TEXT_DIM)
+        c.setFillColor(PDF_TEXT_DIM)
         c.drawString(MARGIN_L, 40, f"Report generated: {date_str}")
         c.drawRightString(PAGE_WIDTH - MARGIN_R, 40, self.branding.footer_text)
         c.restoreState()
@@ -519,12 +538,12 @@ class PDFBuilder:
 
         if improved:
             self._check_page_break(20)
-            self._draw_text(f"Improved: {', '.join(improved[:5])}", _FONT_KEY_MONO, 8, TEXT_DIM)
+            self._draw_text(f"Improved: {', '.join(improved[:5])}", _FONT_KEY_MONO, 8, PDF_TEXT_DIM)
             self._advance(14)
 
         if regressed:
             self._check_page_break(20)
-            self._draw_text(f"Regressed: {', '.join(regressed[:5])}", _FONT_KEY_MONO, 8, BORDER)
+            self._draw_text(f"Regressed: {', '.join(regressed[:5])}", _FONT_KEY_MONO, 8, PDF_BORDER)
             self._advance(14)
 
         self._advance(SPACE_MD)
@@ -613,7 +632,7 @@ class PDFBuilder:
             self._advance(12)
 
             if prompt:
-                self._draw_text(f"Prompt: {prompt[:60]}", _FONT_KEY_MONO, 7, TEXT_DIM)
+                self._draw_text(f"Prompt: {prompt[:60]}", _FONT_KEY_MONO, 7, PDF_TEXT_DIM)
                 self._advance(11)
 
             if snippet:
@@ -657,7 +676,7 @@ class PDFBuilder:
 
         self.canvas.saveState()
         self.canvas.setFont(FONT_MAP[_FONT_KEY_BODY], 9)
-        self.canvas.setFillColor(TEXT_DIM)
+        self.canvas.setFillColor(PDF_TEXT_DIM)
         band = score_band_label(self.cqs)
         self.canvas.drawString(cqs_text_x, self.current_y - 30, f"Band: {band}")
         self.canvas.restoreState()
@@ -700,7 +719,7 @@ class PDFBuilder:
             self._advance(30)
 
             if sp_found:
-                self._draw_text(f"Matched: {sp_found[:70]}", _FONT_KEY_MONO, 7, TEXT_DIM)
+                self._draw_text(f"Matched: {sp_found[:70]}", _FONT_KEY_MONO, 7, PDF_TEXT_DIM)
                 self._advance(12)
 
         if self.confidence:
@@ -713,7 +732,7 @@ class PDFBuilder:
             conf_level = getattr(self.confidence, "level", "Low")
             conf_reason = getattr(self.confidence, "reasoning", "") or ""
 
-            self._draw_text(f"Level: {conf_level}", _FONT_KEY_BODY, 9, TEXT_MAIN)
+            self._draw_text(f"Level: {conf_level}", _FONT_KEY_BODY, 9, PDF_TEXT)
             self._advance(14)
 
             if conf_reason:
@@ -887,7 +906,7 @@ class PDFBuilder:
 
         tier_colors = {
             "High Priority":         self._accent,
-            "Medium Priority":       TEXT_DIM,
+            "Medium Priority":       PDF_TEXT_DIM,
             "Long-Term Optimization": BORDER,
         }
 

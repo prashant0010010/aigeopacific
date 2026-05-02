@@ -3,39 +3,29 @@ ui/styles.py
 ============
 Global CSS styling layer for the AiGeoPacific AI Citation Analyser Streamlit UI.
 
-Phase 2 additions:
-- Light and dark mode CSS custom properties via data-theme attribute
-- inject_theme_attribute() helper for toggling theme from app.py
-- All colour references use CSS variables — no hardcoded hex in component HTML
-- Default remains dark (Phase 1 behaviour preserved)
+Phase 2 FIX: Rewrote theme switching. The original JS approach using
+document.documentElement.setAttribute via st.markdown was unreliable because
+Streamlit often strips/defers inline <script> tags.
 
-Usage:
-    from ui.styles import inject_custom_css, inject_theme_attribute
-    inject_custom_css()
-    inject_theme_attribute(st.session_state.get("theme", "dark"))
+Solution: Use st.components.v1.html (iframe) to run JS that reaches window.parent.document,
+plus CSS class-based theming (.theme-light / .theme-dark on .stApp) as the primary
+mechanism with [data-theme] as fallback.
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 
-# ===========================================================================
-# CSS Design System
-# ===========================================================================
 
-_CSS = """
+_CSS_BASE = """
 <style>
-
-/* =========================================================================
-   Google Fonts
-   ========================================================================= */
 
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
 
-/* =========================================================================
-   Phase 2 — Theme tokens: dark (default)
-   ========================================================================= */
+/* =========================================================
+   DARK THEME (default / :root)
+   ========================================================= */
 
-:root,
-:root[data-theme="dark"] {
+:root {
     --bg-primary:        #0a0c10;
     --bg-card:           #141720;
     --bg-secondary:      #1c2030;
@@ -50,44 +40,43 @@ _CSS = """
     --score-amber-text:  #fef3c7;
     --score-red-bg:      #991b1b;
     --score-red-text:    #fee2e2;
-    --shadow-card:       0 2px 12px rgba(0, 0, 0, 0.4);
-    --shadow-glow:       0 4px 24px rgba(245, 184, 0, 0.12);
+    --shadow-card:       0 2px 12px rgba(0,0,0,0.4);
+    --shadow-glow:       0 4px 24px rgba(245,184,0,0.12);
     --transition:        0.2s ease;
-
-    /* Legacy aliases (Phase 1 compat) */
-    --bg-dark:       #0a0c10;
-    --card-bg:       #141720;
-    --gold:          #f5b800;
-    --gold-hover:    #ffc91a;
-    --text-main:     #ffffff;
-    --text-dim:      #9ca3af;
-    --success:       #166534;
-    --warning:       #92400e;
-    --error:         #991b1b;
-    --success-text:  #dcfce7;
-    --warning-text:  #fef3c7;
-    --error-text:    #fee2e2;
-
-    --font-heading:  'Syne', sans-serif;
-    --font-body:     'DM Sans', sans-serif;
-    --font-mono:     'DM Mono', monospace;
-    --radius-sm:     6px;
-    --radius-md:     10px;
-    --radius-lg:     14px;
+    --bg-dark:           #0a0c10;
+    --card-bg:           #141720;
+    --gold:              #f5b800;
+    --gold-hover:        #ffc91a;
+    --text-main:         #ffffff;
+    --text-dim:          #9ca3af;
+    --success:           #166534;
+    --warning:           #92400e;
+    --error:             #991b1b;
+    --success-text:      #dcfce7;
+    --warning-text:      #fef3c7;
+    --error-text:        #fee2e2;
+    --font-heading:      'Syne', sans-serif;
+    --font-body:         'DM Sans', sans-serif;
+    --font-mono:         'DM Mono', monospace;
+    --radius-sm:         6px;
+    --radius-md:         10px;
+    --radius-lg:         14px;
 }
 
-/* =========================================================================
-   Phase 2 — Theme tokens: light
-   ========================================================================= */
+/* =========================================================
+   LIGHT THEME — activated via .theme-light class on .stApp
+   AND [data-theme="light"] as belt-and-braces fallback
+   ========================================================= */
 
-:root[data-theme="light"] {
+.stApp.theme-light,
+html[data-theme="light"] {
     --bg-primary:        #f9fafb;
     --bg-card:           #ffffff;
     --bg-secondary:      #f3f4f6;
     --text-primary:      #111827;
     --text-secondary:    #6b7280;
-    --accent:            #d4a000;
-    --accent-hover:      #b88c00;
+    --accent:            #b98e00;
+    --accent-hover:      #9a7700;
     --border:            #e5e7eb;
     --score-green-bg:    #dcfce7;
     --score-green-text:  #166534;
@@ -95,48 +84,82 @@ _CSS = """
     --score-amber-text:  #92400e;
     --score-red-bg:      #fee2e2;
     --score-red-text:    #991b1b;
-    --shadow-card:       0 2px 8px rgba(0, 0, 0, 0.08);
-    --shadow-glow:       0 4px 16px rgba(212, 160, 0, 0.12);
+    --shadow-card:       0 2px 8px rgba(0,0,0,0.07);
+    --shadow-glow:       0 4px 16px rgba(185,142,0,0.12);
     --transition:        0.2s ease;
-
-    /* Legacy aliases */
-    --bg-dark:       #f9fafb;
-    --card-bg:       #ffffff;
-    --gold:          #d4a000;
-    --gold-hover:    #b88c00;
-    --text-main:     #111827;
-    --text-dim:      #6b7280;
-    --success:       #dcfce7;
-    --warning:       #fef3c7;
-    --error:         #fee2e2;
-    --success-text:  #166534;
-    --warning-text:  #92400e;
-    --error-text:    #991b1b;
+    --bg-dark:           #f9fafb;
+    --card-bg:           #ffffff;
+    --gold:              #b98e00;
+    --gold-hover:        #9a7700;
+    --text-main:         #111827;
+    --text-dim:          #6b7280;
+    --success:           #dcfce7;
+    --warning:           #fef3c7;
+    --error:             #fee2e2;
+    --success-text:      #166534;
+    --warning-text:      #92400e;
+    --error-text:        #991b1b;
 }
 
-/* =========================================================================
-   Global Reset & Base
-   ========================================================================= */
-
-*, *::before, *::after {
-    box-sizing: border-box;
+/* Apply light bg/text to Streamlit shell when theme-light */
+.stApp.theme-light,
+html[data-theme="light"] .stApp {
+    background-color: #f9fafb !important;
+    color:            #111827 !important;
 }
+
+.stApp.theme-light .block-container,
+html[data-theme="light"] .block-container {
+    background-color: #f9fafb !important;
+}
+
+.stApp.theme-light [data-testid="stSidebar"],
+.stApp.theme-light [data-testid="stSidebarContent"],
+html[data-theme="light"] [data-testid="stSidebar"],
+html[data-theme="light"] [data-testid="stSidebarContent"] {
+    background-color: #f3f4f6 !important;
+    border-right:     1px solid #e5e7eb !important;
+}
+
+.stApp.theme-light [data-testid="stTextInput"] > div > div > input,
+.stApp.theme-light .stTextArea textarea,
+html[data-theme="light"] [data-testid="stTextInput"] > div > div > input,
+html[data-theme="light"] .stTextArea textarea {
+    background-color: #ffffff !important;
+    color:            #111827 !important;
+    border-color:     #e5e7eb !important;
+}
+
+.stApp.theme-light .streamlit-expanderHeader,
+html[data-theme="light"] .streamlit-expanderHeader {
+    background-color: #ffffff !important;
+    border-color:     #e5e7eb !important;
+    color:            #111827 !important;
+}
+
+.stApp.theme-light .streamlit-expanderContent,
+html[data-theme="light"] .streamlit-expanderContent {
+    background-color: #ffffff !important;
+    border-color:     #e5e7eb !important;
+}
+
+/* =========================================================
+   Global reset
+   ========================================================= */
+
+*, *::before, *::after { box-sizing: border-box; }
 
 html, body {
     background-color: var(--bg-primary) !important;
     color:            var(--text-primary) !important;
     font-family:      var(--font-body) !important;
     -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
 }
-
-/* =========================================================================
-   Streamlit App Shell
-   ========================================================================= */
 
 .stApp {
     background-color: var(--bg-primary) !important;
     font-family:      var(--font-body) !important;
+    transition:       background-color 0.25s ease, color 0.25s ease;
 }
 
 .block-container {
@@ -146,22 +169,21 @@ html, body {
     max-width:        960px;
 }
 
-/* =========================================================================
+/* =========================================================
    Sidebar
-   ========================================================================= */
+   ========================================================= */
 
 [data-testid="stSidebar"] {
     background-color: var(--bg-primary) !important;
     border-right:     1px solid var(--border) !important;
-}
-
-[data-testid="stSidebar"] .block-container {
-    padding-top: 1.5rem !important;
+    transition:       background-color 0.25s ease;
 }
 
 [data-testid="stSidebarContent"] {
     background-color: var(--bg-primary) !important;
 }
+
+[data-testid="stSidebar"] .block-container { padding-top: 1.5rem !important; }
 
 [data-testid="stSidebar"] a,
 [data-testid="stSidebar"] span,
@@ -171,13 +193,11 @@ html, body {
     font-size:   0.875rem;
 }
 
-[data-testid="stSidebar"] a:hover {
-    color: var(--accent) !important;
-}
+[data-testid="stSidebar"] a:hover { color: var(--accent) !important; }
 
-/* =========================================================================
+/* =========================================================
    Typography
-   ========================================================================= */
+   ========================================================= */
 
 h1, h2, h3, h4, h5, h6 {
     font-family:    var(--font-heading) !important;
@@ -191,11 +211,7 @@ h2 { font-size: 1.5rem; font-weight: 700; }
 h3 { font-size: 1.2rem; font-weight: 600; }
 h4 { font-size: 1rem;   font-weight: 600; }
 
-p, span, li, label, div {
-    font-family: var(--font-body) !important;
-    color:       var(--text-primary);
-    line-height: 1.6;
-}
+p, li, div { font-family: var(--font-body) !important; line-height: 1.6; }
 
 code, pre, .mono {
     font-family:   var(--font-mono) !important;
@@ -206,23 +222,14 @@ code, pre, .mono {
     font-size:     0.8rem;
 }
 
-pre code {
-    display:    block;
-    padding:    1rem;
-    overflow-x: auto;
-    border:     1px solid var(--border);
-}
-
-.stMarkdown p,
-.stMarkdown li,
-.stMarkdown span {
+.stMarkdown p, .stMarkdown li {
     color:       var(--text-primary) !important;
     font-family: var(--font-body) !important;
 }
 
-/* =========================================================================
+/* =========================================================
    Metric Cards
-   ========================================================================= */
+   ========================================================= */
 
 .metric-card {
     background:    var(--bg-card);
@@ -231,38 +238,34 @@ pre code {
     padding:       1.25rem 1.5rem;
     margin-bottom: 1rem;
     box-shadow:    var(--shadow-card);
-    transition:    transform var(--transition), box-shadow var(--transition);
+    transition:    transform var(--transition), box-shadow var(--transition),
+                   background-color 0.25s ease, border-color 0.25s ease;
     position:      relative;
     overflow:      hidden;
 }
 
 .metric-card::before {
-    content:      '';
-    position:     absolute;
-    top:          0;
-    left:         0;
-    width:        3px;
-    height:       100%;
-    background:   var(--accent);
+    content:       '';
+    position:      absolute;
+    top:           0; left: 0;
+    width:         3px; height: 100%;
+    background:    var(--accent);
     border-radius: var(--radius-lg) 0 0 var(--radius-lg);
-    opacity:      0;
-    transition:   opacity var(--transition);
+    opacity:       0;
+    transition:    opacity var(--transition);
 }
 
 .metric-card:hover {
     transform:    translateY(-2px);
     box-shadow:   var(--shadow-glow);
-    border-color: rgba(245, 184, 0, 0.3);
+    border-color: rgba(245,184,0,0.3);
 }
 
-.metric-card:hover::before {
-    opacity: 1;
-}
+.metric-card:hover::before { opacity: 1; }
 
 .metric-card-title {
     font-family:    var(--font-heading);
-    font-size:      0.9rem;
-    font-weight:    700;
+    font-size:      0.9rem; font-weight: 700;
     color:          var(--accent);
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -270,11 +273,9 @@ pre code {
 }
 
 .metric-card-score {
-    font-family:   var(--font-heading);
-    font-size:     2rem;
-    font-weight:   700;
-    line-height:   1;
-    margin-bottom: 0.5rem;
+    font-family: var(--font-heading);
+    font-size:   2rem; font-weight: 700;
+    line-height: 1; margin-bottom: 0.5rem;
 }
 
 .metric-card-body {
@@ -292,42 +293,28 @@ pre code {
     letter-spacing: 0.08em;
 }
 
-/* =========================================================================
-   Score Badge Classes
-   ========================================================================= */
+/* =========================================================
+   Badges
+   ========================================================= */
 
-.badge-strong,
-.badge-fair,
-.badge-weak {
+.badge-strong, .badge-fair, .badge-weak {
     display:        inline-block;
     padding:        3px 12px;
     border-radius:  999px;
     font-family:    var(--font-mono);
-    font-size:      0.75rem;
-    font-weight:    600;
+    font-size:      0.75rem; font-weight: 600;
     letter-spacing: 0.04em;
     white-space:    nowrap;
     user-select:    none;
 }
 
-.badge-strong {
-    background: var(--score-green-bg);
-    color:      var(--score-green-text);
-}
+.badge-strong { background: var(--score-green-bg); color: var(--score-green-text); }
+.badge-fair   { background: var(--score-amber-bg); color: var(--score-amber-text); }
+.badge-weak   { background: var(--score-red-bg);   color: var(--score-red-text);   }
 
-.badge-fair {
-    background: var(--score-amber-bg);
-    color:      var(--score-amber-text);
-}
-
-.badge-weak {
-    background: var(--score-red-bg);
-    color:      var(--score-red-text);
-}
-
-/* =========================================================================
+/* =========================================================
    Progress Bars
-   ========================================================================= */
+   ========================================================= */
 
 .stProgress > div > div > div > div {
     background:    var(--accent) !important;
@@ -339,9 +326,9 @@ pre code {
     border-radius: 999px;
 }
 
-/* =========================================================================
-   Buttons — Primary
-   ========================================================================= */
+/* =========================================================
+   Buttons
+   ========================================================= */
 
 .stButton > button {
     background:     var(--accent) !important;
@@ -353,21 +340,18 @@ pre code {
     font-size:      0.9rem !important;
     padding:        0.6rem 1.4rem !important;
     cursor:         pointer;
-    transition:     background var(--transition), transform var(--transition), box-shadow var(--transition);
+    transition:     background var(--transition), transform var(--transition);
     letter-spacing: 0.01em;
-    box-shadow:     0 2px 8px rgba(245, 184, 0, 0.25);
+    box-shadow:     0 2px 8px rgba(245,184,0,0.25);
 }
 
 .stButton > button:hover {
     background:  var(--accent-hover) !important;
     transform:   translateY(-1px);
-    box-shadow:  0 4px 16px rgba(245, 184, 0, 0.35) !important;
+    box-shadow:  0 4px 16px rgba(245,184,0,0.35) !important;
 }
 
-.stButton > button:active {
-    transform:  translateY(0);
-    box-shadow: 0 1px 4px rgba(245, 184, 0, 0.2) !important;
-}
+.stButton > button:active  { transform: translateY(0); }
 
 .stButton > button:disabled {
     background:  var(--border) !important;
@@ -376,10 +360,6 @@ pre code {
     box-shadow:  none !important;
     transform:   none !important;
 }
-
-/* =========================================================================
-   Download Button
-   ========================================================================= */
 
 [data-testid="stDownloadButton"] button {
     background:     var(--accent) !important;
@@ -390,21 +370,20 @@ pre code {
     font-weight:    700 !important;
     font-size:      0.9rem !important;
     padding:        0.65rem 1.5rem !important;
-    letter-spacing: 0.01em;
     cursor:         pointer;
-    transition:     background var(--transition), transform var(--transition), box-shadow var(--transition);
-    box-shadow:     0 2px 12px rgba(245, 184, 0, 0.3);
+    box-shadow:     0 2px 12px rgba(245,184,0,0.3);
+    transition:     background var(--transition), transform var(--transition);
 }
 
 [data-testid="stDownloadButton"] button:hover {
     background:  var(--accent-hover) !important;
     transform:   translateY(-1px);
-    box-shadow:  0 6px 20px rgba(245, 184, 0, 0.4) !important;
+    box-shadow:  0 6px 20px rgba(245,184,0,0.4) !important;
 }
 
-/* =========================================================================
+/* =========================================================
    Input Fields
-   ========================================================================= */
+   ========================================================= */
 
 .stTextInput > div > div > input,
 .stTextArea textarea {
@@ -414,25 +393,21 @@ pre code {
     color:         var(--text-primary) !important;
     font-family:   var(--font-body) !important;
     font-size:     0.9rem !important;
-    transition:    border-color var(--transition), box-shadow var(--transition);
+    transition:    border-color var(--transition);
 }
 
 .stTextInput > div > div > input:focus,
 .stTextArea textarea:focus {
     border-color: var(--accent) !important;
-    box-shadow:   0 0 0 3px rgba(245, 184, 0, 0.15) !important;
+    box-shadow:   0 0 0 3px rgba(245,184,0,0.15) !important;
     outline:      none !important;
 }
 
 .stTextInput > div > div > input::placeholder,
-.stTextArea textarea::placeholder {
-    color: var(--text-secondary) !important;
-}
+.stTextArea textarea::placeholder { color: var(--text-secondary) !important; }
 
-.stTextInput label,
-.stTextArea label,
-.stSelectbox label,
-.stCheckbox label {
+.stTextInput label, .stTextArea label,
+.stSelectbox label, .stCheckbox label {
     color:          var(--text-secondary) !important;
     font-family:    var(--font-mono) !important;
     font-size:      0.75rem !important;
@@ -441,14 +416,13 @@ pre code {
     letter-spacing: 0.06em;
 }
 
-/* =========================================================================
+/* =========================================================
    Tabs
-   ========================================================================= */
+   ========================================================= */
 
 .stTabs [data-baseweb="tab-list"] {
     background:    transparent !important;
     border-bottom: 1px solid var(--border) !important;
-    gap:           0.25rem;
 }
 
 .stTabs [data-baseweb="tab"] {
@@ -460,7 +434,7 @@ pre code {
     border:        none !important;
     border-bottom: 2px solid transparent !important;
     padding:       0.5rem 1rem !important;
-    transition:    color var(--transition), border-color var(--transition);
+    transition:    color var(--transition);
 }
 
 .stTabs [aria-selected="true"] {
@@ -469,9 +443,9 @@ pre code {
     background:    transparent !important;
 }
 
-/* =========================================================================
+/* =========================================================
    Expander
-   ========================================================================= */
+   ========================================================= */
 
 .streamlit-expanderHeader {
     background:    var(--bg-card) !important;
@@ -489,9 +463,9 @@ pre code {
     border-radius: 0 0 var(--radius-md) var(--radius-md) !important;
 }
 
-/* =========================================================================
-   Metrics (st.metric)
-   ========================================================================= */
+/* =========================================================
+   st.metric
+   ========================================================= */
 
 [data-testid="stMetricValue"] {
     font-family: var(--font-heading) !important;
@@ -508,35 +482,21 @@ pre code {
     letter-spacing: 0.06em;
 }
 
-/* =========================================================================
-   Dividers
-   ========================================================================= */
+/* =========================================================
+   Dividers / Spinner / Scrollbar
+   ========================================================= */
 
-hr {
-    border-color: var(--border) !important;
-    margin:       1.5rem 0 !important;
-}
-
-/* =========================================================================
-   Spinner
-   ========================================================================= */
-
-.stSpinner > div {
-    border-top-color: var(--accent) !important;
-}
-
-/* =========================================================================
-   Scrollbar
-   ========================================================================= */
+hr { border-color: var(--border) !important; margin: 1.5rem 0 !important; }
+.stSpinner > div { border-top-color: var(--accent) !important; }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg-primary); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 
-/* =========================================================================
+/* =========================================================
    Utility Classes
-   ========================================================================= */
+   ========================================================= */
 
 .section-block {
     background:    var(--bg-card);
@@ -548,8 +508,7 @@ hr {
 
 .gold-label {
     font-family:    var(--font-mono);
-    font-size:      0.72rem;
-    font-weight:    500;
+    font-size:      0.72rem; font-weight: 500;
     color:          var(--accent);
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -564,8 +523,8 @@ hr {
 
 .tag-pill {
     display:       inline-block;
-    background:    rgba(245, 184, 0, 0.1);
-    border:        1px solid rgba(245, 184, 0, 0.25);
+    background:    rgba(245,184,0,0.1);
+    border:        1px solid rgba(245,184,0,0.25);
     color:         var(--accent);
     font-family:   var(--font-mono);
     font-size:     0.7rem;
@@ -585,39 +544,36 @@ hr {
     line-height:   1.5;
 }
 
-.gap-item::before {
-    content:    "->";
-    color:      var(--accent);
-    flex-shrink: 0;
-    margin-top:  1px;
-    font-family: var(--font-mono);
-    font-size:   0.75rem;
-}
-
 .score-number {
     font-family: var(--font-heading);
-    font-size:   3rem;
-    font-weight: 700;
+    font-size:   3rem; font-weight: 700;
     line-height: 1;
     color:       var(--accent);
 }
 
-/* =========================================================================
-   Phase 2 — Citation detected card
-   ========================================================================= */
+/* =========================================================
+   Citation card (theme-aware)
+   ========================================================= */
 
 .citation-card {
-    background:    rgba(22, 101, 52, 0.12);
-    border:        1px solid rgba(34, 197, 94, 0.3);
     border-radius: var(--radius-md);
     padding:       0.75rem 1rem;
     margin-bottom: 0.6rem;
+    /* dark default */
+    background:    rgba(22,101,52,0.12);
+    border:        1px solid rgba(34,197,94,0.3);
+}
+
+html[data-theme="light"] .citation-card,
+.stApp.theme-light .citation-card {
+    background:  #f0fdf4;
+    border-color: #86efac;
 }
 
 .citation-card-domain {
     font-family: var(--font-mono);
     font-size:   0.72rem;
-    color:       #4ade80;
+    color:       var(--score-green-text);
     font-weight: 600;
 }
 
@@ -629,18 +585,18 @@ hr {
     line-height: 1.5;
 }
 
-/* =========================================================================
-   Phase 2 — Delta / progress comparison
-   ========================================================================= */
+/* =========================================================
+   Delta / Progress
+   ========================================================= */
 
 .delta-positive {
-    color:       #4ade80;
+    color:       #16a34a;
     font-weight: 700;
     font-family: var(--font-mono);
 }
 
 .delta-negative {
-    color:       #f87171;
+    color:       #dc2626;
     font-weight: 700;
     font-family: var(--font-mono);
 }
@@ -650,9 +606,9 @@ hr {
     font-family: var(--font-mono);
 }
 
-/* =========================================================================
-   Phase 2 — Prompt visibility row
-   ========================================================================= */
+/* =========================================================
+   Prompt visibility row
+   ========================================================= */
 
 .prompt-row {
     display:       flex;
@@ -672,55 +628,68 @@ hr {
     flex:        1;
 }
 
-/* =========================================================================
-   Hide Streamlit Branding
-   ========================================================================= */
+/* =========================================================
+   Hide Streamlit chrome
+   ========================================================= */
 
 footer { visibility: hidden; }
 #MainMenu { visibility: hidden; }
 [data-testid="stToolbar"] { visibility: hidden; }
-
-header[data-testid="stHeader"] {
-    background:    transparent !important;
-    border-bottom: none !important;
-}
+header[data-testid="stHeader"] { background: transparent !important; border-bottom: none !important; }
 
 </style>
 """
-
-# ===========================================================================
-# Injection helpers
-# ===========================================================================
 
 
 def inject_custom_css() -> None:
     """
     Inject the AiGeoPacific custom CSS into the active Streamlit session.
-
-    Must be called once at the top of app.py before any other Streamlit
-    widgets are rendered. Calling it multiple times is harmless.
+    Must be the first Streamlit call in app.py.
     """
-    st.markdown(_CSS, unsafe_allow_html=True)
+    st.markdown(_CSS_BASE, unsafe_allow_html=True)
 
 
 def inject_theme_attribute(theme: str = "dark") -> None:
     """
-    Set the data-theme attribute on the root element to enable theme switching.
+    Apply theme to the Streamlit app.
 
-    Injects a small JS snippet that sets document.documentElement.setAttribute().
-    Must be called after inject_custom_css().
+    Uses st.components.v1.html to inject a JS snippet inside an iframe
+    that targets window.parent.document — the most reliable way to reach
+    the actual Streamlit DOM from within Streamlit's rendering pipeline.
+
+    Also adds a CSS class to .stApp and sets data-theme on <html> so both
+    the CSS class approach and the attribute approach work simultaneously.
 
     Parameters
     ----------
-    theme : str
-        "dark" (default) or "light"
+    theme : str   "dark" or "light"
     """
     safe_theme = "light" if theme == "light" else "dark"
-    st.markdown(
-        f"""
-        <script>
-            document.documentElement.setAttribute('data-theme', '{safe_theme}');
-        </script>
-        """,
-        unsafe_allow_html=True,
-    )
+    add_cls    = f"theme-{safe_theme}"
+    rm_cls     = "theme-dark" if safe_theme == "light" else "theme-light"
+
+    js = f"""
+    <script>
+    (function applyTheme() {{
+        var p = window.parent;
+        if (!p || !p.document) {{ setTimeout(applyTheme, 200); return; }}
+        var doc = p.document;
+
+        // 1) Set data-theme on <html>
+        doc.documentElement.setAttribute('data-theme', '{safe_theme}');
+
+        // 2) Toggle class on .stApp
+        var app = doc.querySelector('.stApp');
+        if (app) {{
+            app.classList.remove('{rm_cls}');
+            app.classList.add('{add_cls}');
+        }}
+
+        // 3) Mirror on sidebar for belt-and-braces
+        var sb = doc.querySelector('[data-testid="stSidebar"]');
+        if (sb) sb.setAttribute('data-theme', '{safe_theme}');
+    }})();
+    </script>
+    """
+    # height=0 so it takes no visual space
+    components.html(js, height=0, scrolling=False)

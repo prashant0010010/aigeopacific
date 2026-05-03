@@ -12,6 +12,12 @@ Phase 2 additions:
 - History panel: history_view.history_panel() rendered in sidebar
 - Audit save: storage.save_audit() called after every successful audit
 
+Live progress (Fix 3):
+- run_audit() accepts a progress_callback that fires at each pipeline step.
+- The callback writes a plain-text status line into a st.empty() widget,
+  appending the elapsed wall-clock time in seconds so the user always sees
+  something moving rather than a frozen spinner.
+
 Architectural rule: zero business logic in this file.
 """
 
@@ -19,6 +25,7 @@ import io
 import os
 import re
 import tempfile
+import time
 from datetime import datetime
 
 import streamlit as st
@@ -301,6 +308,10 @@ if st.session_state.audit_status == "idle":
 # STATE: running
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# STATE: running
+# ---------------------------------------------------------------------------
+
 elif st.session_state.audit_status == "running":
 
     url = st.session_state.last_url
@@ -318,27 +329,42 @@ elif st.session_state.audit_status == "running":
         unsafe_allow_html=True,
     )
 
-    progress = st.progress(0)
-    status_text = st.empty()
+    # ------------------------------------------------------------------
+    # Live status widget — updated by the progress_callback below.
+    # A single st.empty() is the correct pattern: repeated .markdown()
+    # calls on the same element replace the content in place without
+    # accumulating new DOM nodes or triggering a full rerun.
+    # ------------------------------------------------------------------
+    status_placeholder = st.empty()
+    audit_wall_start = time.time()
 
-    phases = [
-        (10, "Fetching page content..."),
-        (30, "Scoring GEO metrics..."),
-        (55, "Running search presence validation..."),
-        (70, "Analysing competitor pages..."),
-        (82, "Routing enrichment..."),
-        (90, "Checking prompt visibility..."),
-        (96, "Assembling audit result..."),
-        (100, "Generating PDF report..."),
-    ]
-
-    for pct, label in phases[:-2]:
-        progress.progress(pct)
-        status_text.markdown(
-            f'<p style="font-family:\'DM Mono\',monospace; font-size:0.8rem; '
-            f'color:var(--text-secondary);">{label}</p>',
-            unsafe_allow_html=True,
+    def _make_status_html(msg: str) -> str:
+        """Render a status line with elapsed seconds."""
+        elapsed = int(time.time() - audit_wall_start)
+        return (
+            f'<p style="font-family:\'DM Mono\',monospace; font-size:0.82rem; '
+            f'color:var(--text-secondary); margin:0.1rem 0;">'
+            f'⏳ {msg} <span style="color:var(--border);">({elapsed}s)</span></p>'
         )
+
+    def _progress_callback(step: str) -> None:
+        """
+        Called by audit_runner at the start of each pipeline step.
+
+        Updates the status placeholder in place.  Any Streamlit exception
+        (e.g. widget no longer in DOM) is caught and ignored so the audit
+        pipeline is never interrupted by a UI hiccup.
+        """
+        try:
+            status_placeholder.markdown(
+                _make_status_html(step),
+                unsafe_allow_html=True,
+            )
+        except Exception:
+            pass
+
+    # Show the first message immediately so the widget is never blank
+    _progress_callback("Fetching page content...")
 
     try:
         # Build PageConfig (Phase 2: includes keyword_prompts, api keys)
@@ -351,24 +377,12 @@ elif st.session_state.audit_status == "running":
             perplexity_api_key=perplexity_key.strip() if perplexity_key else None,
         )
 
-        result = run_audit(config)
-
-        progress.progress(96)
-        status_text.markdown(
-            '<p style="font-family:\'DM Mono\',monospace; font-size:0.8rem; '
-            'color:var(--text-secondary);">Assembling audit result...</p>',
-            unsafe_allow_html=True,
-        )
+        result = run_audit(config, progress_callback=_progress_callback)
 
         # -----------------------------------------------------------------------
         # Phase 2 — PDF wiring: build_bytes() and store in session state
         # -----------------------------------------------------------------------
-        progress.progress(98)
-        status_text.markdown(
-            '<p style="font-family:\'DM Mono\',monospace; font-size:0.8rem; '
-            'color:var(--text-secondary);">Generating PDF report...</p>',
-            unsafe_allow_html=True,
-        )
+        _progress_callback("Building your report...")
 
         # Resolve branding config from sidebar inputs
         logo_path = None
@@ -394,10 +408,11 @@ elif st.session_state.audit_status == "running":
             print(f"[App] PDF generation failed: {pdf_exc}")
             pdf_bytes = None
 
-        progress.progress(100)
-        status_text.markdown(
-            '<p style="font-family:\'DM Mono\',monospace; font-size:0.8rem; '
-            'color:var(--score-green-text);">Audit complete.</p>',
+        elapsed_total = int(time.time() - audit_wall_start)
+        status_placeholder.markdown(
+            f'<p style="font-family:\'DM Mono\',monospace; font-size:0.82rem; '
+            f'color:var(--score-green-text); margin:0.1rem 0;">'
+            f'✓ Audit complete in {elapsed_total}s</p>',
             unsafe_allow_html=True,
         )
 

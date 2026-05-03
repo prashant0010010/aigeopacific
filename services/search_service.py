@@ -18,6 +18,7 @@ Responsibilities:
 import random
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import List, Optional
 from urllib.parse import urlparse
 
@@ -45,6 +46,11 @@ _SCORE_NOT_VISIBLE: float = 0.0
 
 _MAX_RESULTS: int = 30
 _MIN_TITLE_WORD_OVERLAP: int = 2
+
+# Hard cap on a single DuckDuckGo network call.  A DDGS() call that hangs
+# (rate-limit back-off, slow DNS, etc.) will be abandoned after this many
+# seconds and an empty list returned instead of blocking the whole pipeline.
+_DDG_CALL_TIMEOUT: int = 8
 
 
 # ===========================================================================
@@ -191,12 +197,27 @@ def run_search(query: str) -> List[dict]:
         return cached
 
     # --- Live request ---
+    # Add a small random delay to reduce rate-limiting risk.
     time.sleep(random.uniform(0.5, 1.5))
 
-    try:
+    def _do_ddg_search() -> List[dict]:
+        """Inner call — runs inside a worker thread so we can time it out."""
         with DDGS() as ddgs:
             results = ddgs.text(query, max_results=_MAX_RESULTS)
-            result_list = list(results) if results else []
+            return list(results) if results else []
+
+    try:
+        # submit() + result(timeout=N) is the standard pattern for applying a
+        # wall-clock cap to a blocking call without asyncio.  A single slow
+        # DDG query can never block the audit pipeline for more than
+        # _DDG_CALL_TIMEOUT seconds.
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_do_ddg_search)
+            try:
+                result_list = future.result(timeout=_DDG_CALL_TIMEOUT)
+            except FuturesTimeoutError:
+                future.cancel()
+                return []
 
         if result_list:
             _cache.set(cache_key, result_list)

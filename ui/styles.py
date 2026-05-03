@@ -650,19 +650,35 @@ def inject_custom_css() -> None:
 
 def inject_theme_attribute(theme: str = "dark") -> None:
     """
-    Apply theme to the Streamlit app.
+    Apply theme to the Streamlit app by injecting a JS snippet that reaches
+    window.parent.document — the only reliable way to mutate the real
+    Streamlit DOM from inside a component iframe.
 
-    Uses st.components.v1.html to inject a JS snippet inside an iframe
-    that targets window.parent.document — the most reliable way to reach
-    the actual Streamlit DOM from within Streamlit's rendering pipeline.
+    Implementation note — why not st.iframe(srcdoc=...)?
+    -------------------------------------------------------
+    Streamlit >= 1.33 emits a DeprecationWarning suggesting to replace
+    ``st.components.v1.html`` with ``st.iframe``.  However, as of Streamlit
+    <= 1.44 the ``st.iframe`` call only accepts a ``src`` URL argument;
+    ``srcdoc`` exists in the method signature (for forward-compatibility) but
+    raises ``TypeError: got an unexpected keyword argument 'srcdoc'`` at
+    runtime when actually passed.
 
-    Also adds a CSS class to .stApp and sets data-theme on <html> so both
-    the CSS class approach and the attribute approach work simultaneously.
+    Strategy: always use ``components.v1.html`` (proven, works on every
+    Streamlit >= 1.0) and suppress only the specific deprecation warning it
+    emits so the console stays clean.  When Streamlit ships a version where
+    ``srcdoc`` is callable, this function can be updated to use it.
+
+    If ``components.v1.html`` itself raises for any reason (e.g. a headless
+    test runner with no component support), the function falls back silently —
+    the CSS variables injected by ``inject_custom_css()`` still provide
+    baseline theming.
 
     Parameters
     ----------
     theme : str   "dark" or "light"
     """
+    import warnings
+
     safe_theme = "light" if theme == "light" else "dark"
     add_cls    = f"theme-{safe_theme}"
     rm_cls     = "theme-dark" if safe_theme == "light" else "theme-light"
@@ -689,7 +705,21 @@ def inject_theme_attribute(theme: str = "dark") -> None:
     }})();
     """
 
-    # Wrap JS in a minimal HTML document for st.iframe's srcdoc parameter.
-    # height=0 so it takes no visual space.
     html_doc = f"<html><body><script>{js}</script></body></html>"
-    st.iframe(srcdoc=html_doc, height=0, scrolling=False)
+
+    try:
+        import streamlit.components.v1 as _components
+        # Suppress the "replace with st.iframe" DeprecationWarning that some
+        # Streamlit builds emit.  We deliberately keep using components.v1.html
+        # because st.iframe's srcdoc parameter is not yet callable.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r".*st\.iframe.*|.*components\.v1\.html.*",
+                category=DeprecationWarning,
+            )
+            _components.html(html_doc, height=0, scrolling=False)
+    except Exception:
+        # Silent fallback — CSS variables from inject_custom_css() still theme
+        # the app; only the JS-driven .stApp class toggle is lost.
+        pass

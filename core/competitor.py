@@ -5,9 +5,11 @@ Competitor Analysis module for the AiGeoPacific AI Citation Analyser.
 
 Phase 2 additions:
 - Concurrent competitor fetching via ThreadPoolExecutor (max_workers=3)
-- Per-URL timeout of 15 seconds; total competitor block timeout of 30 seconds
+- Per-URL timeout of 15 seconds; total competitor block capped at 25 seconds
+  via concurrent.futures.wait(..., timeout=25). Any futures still pending
+  after 25 s are cancelled and their slots silently filled with empty results.
 - Citation-anchored gap analysis: gap text references specific competitor
-  advantages where citation patterns differ
+  advantages where citation patterns differ.
 
 This module never crashes the audit pipeline.
 All competitor fetch/score failures are caught silently and partial results
@@ -15,7 +17,11 @@ are returned.
 """
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    wait,
+    ALL_COMPLETED,
+)
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -58,8 +64,8 @@ _MAX_WINNING_FACTORS: int = 3
 
 # Phase 2 concurrency settings
 _MAX_WORKERS: int = 3
-_TOTAL_TIMEOUT: int = 30      # seconds for all competitor fetches combined
-_PER_URL_TIMEOUT: int = 15    # seconds per individual fetch (enforced in fetch_page)
+_GLOBAL_TIMEOUT: int = 25    # hard cap — entire competitor block never exceeds this
+_PER_URL_TIMEOUT: int = 15   # seconds per individual fetch (enforced in fetch_page)
 
 
 # ===========================================================================
@@ -165,7 +171,14 @@ def _audit_single_competitor(url: str) -> Optional[CompetitorMetric]:
     Fetch and score a single competitor page. Intended to run inside a
     ThreadPoolExecutor worker thread.
 
-    Returns None silently on any failure (fetch error, JS gate, exception).
+    The fetch itself is wrapped in a nested ThreadPoolExecutor so that a
+    single stuck HTTP connection cannot hold the worker slot beyond
+    _PER_URL_TIMEOUT seconds — the outer wait(timeout=_GLOBAL_TIMEOUT)
+    can only cancel futures that have not yet *started*, so this inner
+    guard is the only reliable way to enforce a per-URL cap.
+
+    Returns None silently on any failure (fetch error, JS gate, timeout,
+    or exception).
 
     Parameters
     ----------
@@ -174,7 +187,7 @@ def _audit_single_competitor(url: str) -> Optional[CompetitorMetric]:
     -------
     Optional[CompetitorMetric]
     """
-    try:
+    def _fetch_and_score() -> Optional[CompetitorMetric]:
         page_data = fetch_page(url)
 
         if page_data.get("status") in ("failed", "limited_access"):
@@ -202,6 +215,16 @@ def _audit_single_competitor(url: str) -> Optional[CompetitorMetric]:
             cqs=cqs,
         )
 
+    try:
+        from concurrent.futures import ThreadPoolExecutor as _TPE, TimeoutError as _TE
+        with _TPE(max_workers=1) as inner:
+            f = inner.submit(_fetch_and_score)
+            try:
+                return f.result(timeout=_PER_URL_TIMEOUT)
+            except _TE:
+                f.cancel()
+                logger.debug("Per-URL timeout (%ds) hit for %s", _PER_URL_TIMEOUT, url)
+                return None
     except Exception as exc:
         logger.debug("Competitor audit failed for %s: %s", url, exc)
         return None
@@ -217,14 +240,17 @@ def fetch_and_score_competitors(
 ) -> List[CompetitorMetric]:
     """
     Run mini-audits on all competitor URLs concurrently using
-    ThreadPoolExecutor.
+    ThreadPoolExecutor with a hard global wall-clock cap of
+    _GLOBAL_TIMEOUT (25 s).
+
+    Uses concurrent.futures.wait(..., timeout=_GLOBAL_TIMEOUT) instead of
+    as_completed(), so the entire block is guaranteed to return within 25 s
+    regardless of how many URLs are stalled. Any future still running at
+    that point is cancelled and its slot silently discarded.
 
     Note: Uses concurrent.futures, NOT asyncio. Streamlit has known event
     loop conflicts with asyncio — ThreadPoolExecutor is safe in all
     Streamlit versions.
-
-    Per-URL timeout: _PER_URL_TIMEOUT (15 seconds) enforced by fetcher.
-    Total block timeout: _TOTAL_TIMEOUT (30 seconds) via as_completed().
 
     Parameters
     ----------
@@ -248,25 +274,37 @@ def fetch_and_score_competitors(
             for url in urls
         }
 
-        try:
-            for future in as_completed(future_to_url, timeout=_TOTAL_TIMEOUT):
-                url = future_to_url[future]
-                try:
-                    result = future.result()
-                    if result is not None:
-                        audited.append(result)
-                        logger.debug("Competitor audited: %s (CQS %.1f)", url, result.cqs)
-                    else:
-                        logger.debug("Competitor skipped (no result): %s", url)
-                except Exception as exc:
-                    logger.debug("Competitor future failed for %s: %s", url, exc)
+        # wait() blocks until ALL futures are done OR _GLOBAL_TIMEOUT elapses.
+        # Returns (done, not_done). We harvest done and cancel not_done.
+        done, not_done = wait(
+            future_to_url.keys(),
+            timeout=_GLOBAL_TIMEOUT,
+            return_when=ALL_COMPLETED,
+        )
 
-        except FuturesTimeoutError:
+        if not_done:
+            timed_out_urls = [future_to_url[f] for f in not_done]
             logger.warning(
-                "Competitor fetch block exceeded %ds timeout. "
-                "%d/%d results collected.",
-                _TOTAL_TIMEOUT, len(audited), len(urls)
+                "Competitor fetch hit %ds global timeout. "
+                "Cancelled %d pending URL(s): %s",
+                _GLOBAL_TIMEOUT,
+                len(not_done),
+                timed_out_urls,
             )
+            for f in not_done:
+                f.cancel()
+
+        for future in done:
+            url = future_to_url[future]
+            try:
+                result = future.result()
+                if result is not None:
+                    audited.append(result)
+                    logger.debug("Competitor audited: %s (CQS %.1f)", url, result.cqs)
+                else:
+                    logger.debug("Competitor skipped (no result): %s", url)
+            except Exception as exc:
+                logger.debug("Competitor future failed for %s: %s", url, exc)
 
     return audited
 

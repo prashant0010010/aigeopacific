@@ -10,6 +10,11 @@ Phase 2 additions:
 - Delta wiring: find_previous_audit() + compute_delta() auto-attached
 - save_audit() called after every successful audit
 
+Progress callback:
+- run_audit() accepts an optional progress_callback(step: str) callable.
+- app.py passes a function that updates the st.empty() status widget.
+- The callback is fire-and-forget; exceptions inside it are silently ignored.
+
 This module contains zero scoring logic. It is a pure coordinator.
 """
 
@@ -17,6 +22,7 @@ import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from typing import Callable, Optional
 
 from core import competitor, confidence, fetcher, scorer
 from core.delta import compute_delta, find_previous_audit
@@ -131,6 +137,32 @@ def _elapsed(start: float) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Progress callback helper
+# ---------------------------------------------------------------------------
+
+def _notify(callback: Optional[Callable[[str], None]], step: str) -> None:
+    """
+    Fire the progress callback if one was provided.
+
+    Exceptions inside the callback (e.g. a stale Streamlit widget) are
+    silently swallowed so a UI glitch never crashes the audit pipeline.
+
+    Parameters
+    ----------
+    callback : Optional[Callable[[str], None]]
+        A function that accepts a single string step description.
+    step : str
+        Human-readable description of the pipeline step just started.
+    """
+    if callback is None:
+        return
+    try:
+        callback(step)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Phase 2 — Enrichment routing
 # ---------------------------------------------------------------------------
 
@@ -184,7 +216,10 @@ def _get_enrichment(result: AuditResult, config: PageConfig) -> EnrichmentResult
 # Main orchestrator
 # ===========================================================================
 
-def run_audit(config: PageConfig) -> AuditResult:
+def run_audit(
+    config: PageConfig,
+    progress_callback: Optional[Callable[[str], None]] = None,
+) -> AuditResult:
     """
     Execute the full AiGeoPacific audit pipeline for a single page.
 
@@ -201,11 +236,13 @@ def run_audit(config: PageConfig) -> AuditResult:
     10. Save audit to local storage
     11. Compute delta against previous audit (if one exists)
 
-    This function never raises. All exceptions are caught at the top level.
-
     Parameters
     ----------
     config : PageConfig
+    progress_callback : Optional[Callable[[str], None]]
+        If provided, called with a short human-readable string at the start
+        of each pipeline step.  app.py uses this to update the live status
+        widget without polling.  Exceptions inside the callback are ignored.
 
     Returns
     -------
@@ -217,6 +254,7 @@ def run_audit(config: PageConfig) -> AuditResult:
         # ===================================================================
         # Step 1 — Fetch Page
         # ===================================================================
+        _notify(progress_callback, "Fetching page content...")
         print(f"[Audit] Step 1 — Fetching: {config.url}")
         step_start = time.time()
 
@@ -238,6 +276,7 @@ def run_audit(config: PageConfig) -> AuditResult:
         # ===================================================================
         # Step 3 — Parallel: Scorer + Search Service
         # ===================================================================
+        _notify(progress_callback, "Running 8 GEO metrics...")
         print("[Audit] Step 3 — Scorer + search in parallel")
         step_start = time.time()
 
@@ -278,6 +317,7 @@ def run_audit(config: PageConfig) -> AuditResult:
                 elif future is future_search:
                     try:
                         search_result = future.result()
+                        _notify(progress_callback, "Checking search presence...")
                         print(f"[Audit] Step 3b — Search done ({_elapsed(step_start)})")
                     except Exception as exc:
                         print(f"[Audit] Step 3b — Search failed: {exc}")
@@ -302,6 +342,7 @@ def run_audit(config: PageConfig) -> AuditResult:
         # ===================================================================
         # Step 4 — Competitor Analysis (concurrent, Phase 2)
         # ===================================================================
+        _notify(progress_callback, "Analysing competitor pages...")
         print("[Audit] Step 4 — Competitor analysis")
         step_start = time.time()
 
@@ -331,6 +372,7 @@ def run_audit(config: PageConfig) -> AuditResult:
         # ===================================================================
         # Step 5 — Confidence Calculation
         # ===================================================================
+        _notify(progress_callback, "Calculating Citation Quality Score...")
         print("[Audit] Step 5 — Confidence")
         step_start = time.time()
 
@@ -353,6 +395,7 @@ def run_audit(config: PageConfig) -> AuditResult:
         # ===================================================================
         # Step 6 — Enrichment routing (Phase 2)
         # ===================================================================
+        _notify(progress_callback, "Generating recommendations...")
         print("[Audit] Step 6 — Enrichment routing")
         step_start = time.time()
 
@@ -392,6 +435,7 @@ def run_audit(config: PageConfig) -> AuditResult:
         prompt_presence_results = []
 
         if keyword_prompts:
+            _notify(progress_callback, "Checking prompt visibility...")
             print(f"[Audit] Step 7 — Prompt presence for {len(keyword_prompts)} prompts")
             step_start = time.time()
 
@@ -453,6 +497,7 @@ def run_audit(config: PageConfig) -> AuditResult:
         # ===================================================================
         # Step 9 — Assemble final AuditResult
         # ===================================================================
+        _notify(progress_callback, "Building your report...")
         result = partial_result
         result.confidence_level = conf_result.level   # top-level field for AuditMeta
 
